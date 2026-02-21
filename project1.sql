@@ -1,117 +1,90 @@
-/* =========================================================
-   CPEN 412 Mini Project — TASK 1 (PostgreSQL)
-   Campus Facility Booking System (DB + Extra Marks)
-   Tables: facilities, users, bookings
-   Extras: constraints, timestamps, slot range, overlap prevention
-   ========================================================= */
+-- Drop tables in correct order
+DROP TABLE IF EXISTS bookings CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS facilities CASCADE;
 
--- 1) Enable extension needed for GiST exclusion constraint
+-- Enable extension
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
--- 2) Reset (drop tables in correct dependency order)
-DROP TABLE IF EXISTS bookings;
-DROP TABLE IF EXISTS users;
-DROP TABLE IF EXISTS facilities;
-
--- 3) Create FACILITIES table
+-- =========================================================
+-- FACILITIES TABLE (matches Facility.java exactly)
+-- =========================================================
 CREATE TABLE facilities (
-  id         SERIAL PRIMARY KEY,
-  name       VARCHAR(100) NOT NULL,
-  location   VARCHAR(120) NOT NULL,
-  capacity   INT NOT NULL CHECK (capacity > 0),
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  id           BIGSERIAL PRIMARY KEY,
+  name         VARCHAR(100) NOT NULL,
+  location     VARCHAR(120) NOT NULL,
+  capacity     INTEGER NOT NULL CHECK (capacity > 0),
+  is_available BOOLEAN DEFAULT TRUE,
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  -- NO description column (removed from entity)
 );
 
--- 4) Create USERS table
+-- =========================================================
+-- USERS TABLE (matches User.java exactly)
+-- =========================================================
 CREATE TABLE users (
-  id         SERIAL PRIMARY KEY,
+  id         BIGSERIAL PRIMARY KEY,
   name       VARCHAR(100) NOT NULL,
   email      VARCHAR(120) NOT NULL UNIQUE,
-  role       VARCHAR(30)  NOT NULL CHECK (role IN ('student','staff','admin')),
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  password   VARCHAR(255) NOT NULL,  -- ADDED to match entity
+  role       VARCHAR(30) NOT NULL CHECK (role IN ('STUDENT', 'STAFF', 'ADMIN')),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  -- NO updated_at in entity, so we omit it
 );
 
--- 5) Create BOOKINGS table
--- slot = generated time range (date+start_time to date+end_time)
+-- =========================================================
+-- BOOKINGS TABLE (matches Booking.java exactly)
+-- =========================================================
 CREATE TABLE bookings (
-  id         SERIAL PRIMARY KEY,
-  facility_id INT REFERENCES facilities(id),
-  user_id     INT REFERENCES users(id),
+  id          BIGSERIAL PRIMARY KEY,
+  facility_id BIGINT NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
+  user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   date        DATE NOT NULL,
   start_time  TIME NOT NULL,
   end_time    TIME NOT NULL,
-  status      VARCHAR(30) NOT NULL
-              CHECK (status IN ('pending','confirmed','cancelled')),
-  created_at  TIMESTAMP DEFAULT NOW(),
-  updated_at  TIMESTAMP DEFAULT NOW(),
-  slot        TSRANGE GENERATED ALWAYS AS (
-                tsrange(date + start_time, date + end_time, '[)')
-              ) STORED
+  status      VARCHAR(30) NOT NULL CHECK (status IN ('CONFIRMED', 'CANCELLED', 'COMPLETED', 'PENDING')),
+  purpose     VARCHAR(500),
+  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  -- NO updated_at, NO slot in entity
 );
 
--- 6) Extra marks: Prevent overlapping bookings per facility (except cancelled)
+-- =========================================================
+-- ADDITIONAL CONSTRAINTS
+-- =========================================================
+ALTER TABLE bookings 
+ADD CONSTRAINT valid_time_range CHECK (end_time > start_time);
+
 ALTER TABLE bookings
-ADD CONSTRAINT no_overlap
+ADD CONSTRAINT no_overlapping_bookings
 EXCLUDE USING gist (
   facility_id WITH =,
-  slot WITH &&
+  tsrange(date + start_time, date + end_time, '[)') WITH &&
 )
-WHERE (status <> 'cancelled');
+WHERE (status != 'CANCELLED');
 
+-- =========================================================
+-- INDEXES
+-- =========================================================
+CREATE INDEX idx_bookings_facility_id ON bookings(facility_id);
+CREATE INDEX idx_bookings_user_id ON bookings(user_id);
+CREATE INDEX idx_bookings_date ON bookings(date);
+CREATE INDEX idx_users_email ON users(email);
 
+-- =========================================================
+-- SAMPLE DATA (with passwords)
+-- =========================================================
+INSERT INTO facilities (name, location, capacity, is_available)
+VALUES 
+  ('Engineering Lab', 'School of Engineering Block', 40, TRUE),
+  ('Pent Room C24', 'Pentagon Hostel', 6, TRUE);
 
-/* =========================================================
-   SAMPLE DATA (at least 1 row per table)
-   ========================================================= */
+INSERT INTO users (name, email, password, role)
+VALUES 
+  ('Peggy Esinam Somuah', 'peggy@gmail.com', 'password123', 'STUDENT'),
+  ('Samuel Idana', 'samuel@gmail.com', 'password123', 'STUDENT');
 
--- Facilities
-INSERT INTO facilities (name, location, capacity)
-VALUES
-  ('Engineering Lab', 'School of Engineering Block', 40),
-  ('Pent Room C24',   'Pentagon Hostel',            6);
-
--- Users
-INSERT INTO users (name, email, role)
-VALUES
-  ('Peggy Esinam Somuah', 'peggy@gmail.com',  'student'),
-  ('Samuel Idana',        'samuel@gmail.com', 'student');
-
--- Bookings
-INSERT INTO bookings (facility_id, user_id, date, start_time, end_time, status)
-VALUES
-  (1, 1, '2026-02-17', '09:00', '10:00', 'confirmed'),
-  (2, 2, '2026-02-18', '14:00', '16:00', 'confirmed');
-
-
-
-/* =========================================================
-   VERIFY TABLE CONTENTS
-   ========================================================= */
-
-SELECT * FROM facilities;
-SELECT * FROM users;
-SELECT * FROM bookings;
-
-
-
-/* =========================================================
-   READABLE VIEW (JOIN) — shows names/emails/facility names
-   ========================================================= */
-
-SELECT
-  b.id        AS booking_id,
-  f.name      AS facility_name,
-  f.location,
-  u.name      AS user_name,
-  u.email,
-  b.date,
-  b.start_time,
-  b.end_time,
-  b.status,
-  b.created_at
-FROM bookings b
-JOIN facilities f ON f.id = b.facility_id
-JOIN users u      ON u.id = b.user_id
-ORDER BY b.id;
+INSERT INTO bookings (facility_id, user_id, date, start_time, end_time, status, purpose)
+VALUES 
+  (1, 1, '2026-02-17', '09:00', '10:00', 'CONFIRMED', 'Lab session'),
+  (2, 2, '2026-02-18', '14:00', '16:00', 'CONFIRMED', 'Study group meeting');

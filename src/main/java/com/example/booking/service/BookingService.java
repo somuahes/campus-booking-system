@@ -1,6 +1,8 @@
 package com.example.booking.service;
 
 import com.example.booking.dto.BookingRequest;
+import com.example.booking.dto.BookingResponse;
+import com.example.booking.exception.BookingConflictException;
 import com.example.booking.model.Booking;
 import com.example.booking.model.BookingStatus;
 import com.example.booking.model.Facility;
@@ -8,105 +10,171 @@ import com.example.booking.model.User;
 import com.example.booking.repository.BookingRepository;
 import com.example.booking.repository.FacilityRepository;
 import com.example.booking.repository.UserRepository;
+import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
-import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class BookingService {
-
+    
     private final BookingRepository bookingRepository;
-    private final FacilityRepository facilityRepository;
     private final UserRepository userRepository;
-
-    public BookingService(BookingRepository bookingRepository, FacilityRepository facilityRepository, UserRepository userRepository) {
+    private final FacilityRepository facilityRepository;
+    
+    public BookingService(BookingRepository bookingRepository, 
+                         UserRepository userRepository,
+                         FacilityRepository facilityRepository) {
         this.bookingRepository = bookingRepository;
-        this.facilityRepository = facilityRepository;
         this.userRepository = userRepository;
+        this.facilityRepository = facilityRepository;
     }
-
-    public List<Booking> getAllBookings() {
-        return bookingRepository.findAll();
+    
+    public List<BookingResponse> getAllBookings() {
+        return bookingRepository.findAll().stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
     }
-
+    
+    public BookingResponse getBookingById(Long id) {
+        Booking booking = bookingRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Booking not found with id: " + id));
+        return convertToResponse(booking);
+    }
+    
     @Transactional
-    public Booking createBooking(BookingRequest request) {
-        // Validate Facility
-        Facility facility = facilityRepository.findById(request.getFacilityId())
-                .orElseThrow(() -> new IllegalArgumentException("Facility not found"));
-
-        // Validate User
+    public BookingResponse createBooking(BookingRequest request) {
+        // Validate user exists
         User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-
-        // Validate Times
-        if (request.getStartTime().isAfter(request.getEndTime())) {
-             throw new IllegalArgumentException("Start time must be before end time");
+                .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + request.getUserId()));
+        
+        // Validate facility exists and is available
+        Facility facility = facilityRepository.findById(request.getFacilityId())
+                .orElseThrow(() -> new EntityNotFoundException("Facility not found with id: " + request.getFacilityId()));
+        
+        if (!facility.getIsAvailable()) {
+            throw new IllegalStateException("Facility is not available for booking");
         }
-
-        // Check Conflicts
-        List<Booking> conflicts = bookingRepository.findConflictingBookings(
+        
+        // Check for conflicting bookings
+        boolean hasConflict = bookingRepository.existsConflictingBooking(
                 request.getFacilityId(),
                 request.getDate(),
                 request.getStartTime(),
                 request.getEndTime()
         );
-
-        if (!conflicts.isEmpty()) {
-            throw new IllegalArgumentException("Time slot is not available");
+        
+        if (hasConflict) {
+            throw new BookingConflictException(
+                "Facility is already booked during the requested time slot"
+            );
         }
-
+        
+        // Create and save booking
         Booking booking = new Booking();
-        booking.setFacility(facility);
         booking.setUser(user);
+        booking.setFacility(facility);
         booking.setDate(request.getDate());
         booking.setStartTime(request.getStartTime());
         booking.setEndTime(request.getEndTime());
-        booking.setStatus(BookingStatus.CONFIRMED); // Auto-confirm for simplicity
-
-        return bookingRepository.save(booking);
-    }
-
-    public Optional<Booking> updateBooking(Long id, BookingRequest request) {
-        return bookingRepository.findById(id).map(existing -> {
-             // Validate Times
-            if (request.getStartTime().isAfter(request.getEndTime())) {
-                throw new IllegalArgumentException("Start time must be before end time");
-            }
-            
-             // Check Conflicts (excluding current booking) -- simplified logic: if generic conflict exists and it's not THIS booking
-            List<Booking> conflicts = bookingRepository.findConflictingBookings(
-                    existing.getFacility().getId(), // Assuming facility doesn't change for simplicity
-                    request.getDate(),
-                    request.getStartTime(),
-                    request.getEndTime()
-            );
-            
-            boolean conflictExists = conflicts.stream().anyMatch(b -> !b.getId().equals(id));
-            if(conflictExists) {
-                 throw new IllegalArgumentException("Time slot is not available");
-            }
-
-            existing.setDate(request.getDate());
-            existing.setStartTime(request.getStartTime());
-            existing.setEndTime(request.getEndTime());
-            return bookingRepository.save(existing);
-        });
-    }
-
-    public void cancelBooking(Long id) {
-        bookingRepository.findById(id).ifPresent(booking -> {
-            booking.setStatus(BookingStatus.CANCELLED);
-            bookingRepository.save(booking);
-        });
+        booking.setPurpose(request.getPurpose());
+        booking.setStatus(BookingStatus.CONFIRMED);
+        
+        Booking savedBooking = bookingRepository.save(booking);
+        return convertToResponse(savedBooking);
     }
     
-    public List<Booking> checkAvailability(Long facilityId, LocalDate date) {
-        // Returns all bookings for that day so frontend can calculate free slots
-        return bookingRepository.findByFacilityIdAndDate(facilityId, date);
+    @Transactional
+    public BookingResponse updateBooking(Long id, BookingRequest request) {
+        Booking booking = bookingRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Booking not found with id: " + id));
+        
+        // Check if booking can be modified
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
+            throw new IllegalStateException("Cannot update a cancelled booking");
+        }
+        
+        // Check for conflicts (excluding this booking)
+        boolean hasConflict = bookingRepository.existsConflictingBooking(
+                request.getFacilityId(),
+                request.getDate(),
+                request.getStartTime(),
+                request.getEndTime()
+            );
+        
+        if (hasConflict) {
+            throw new BookingConflictException(
+                "Facility is already booked during the requested time slot"
+            );
+        }
+        
+        // Update fields
+        booking.setDate(request.getDate());
+        booking.setStartTime(request.getStartTime());
+        booking.setEndTime(request.getEndTime());
+        booking.setPurpose(request.getPurpose());
+        
+        Booking updatedBooking = bookingRepository.save(booking);
+        return convertToResponse(updatedBooking);
+    }
+    
+    @Transactional
+    public void cancelBooking(Long id) {
+        Booking booking = bookingRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Booking not found with id: " + id));
+        
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
+            throw new IllegalStateException("Booking is already cancelled");
+        }
+        
+        booking.setStatus(BookingStatus.CANCELLED);
+        bookingRepository.save(booking);
+    }
+    
+    public boolean isFacilityAvailable(Long facilityId, LocalDate date, String startTime, String endTime) {
+        LocalTime start = LocalTime.parse(startTime);
+        LocalTime end = LocalTime.parse(endTime);
+        
+        return !bookingRepository.existsConflictingBooking(facilityId, date, start, end);
+    }
+    
+    public List<BookingResponse> getBookingsByUser(Long userId) {
+        if (!userRepository.existsById(userId)) {
+            throw new EntityNotFoundException("User not found with id: " + userId);
+        }
+        
+        return bookingRepository.findByUserId(userId).stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+    
+    public List<BookingResponse> getBookingsByFacility(Long facilityId) {
+        if (!facilityRepository.existsById(facilityId)) {
+            throw new EntityNotFoundException("Facility not found with id: " + facilityId);
+        }
+        
+        return bookingRepository.findByFacilityId(facilityId).stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+    
+    private BookingResponse convertToResponse(Booking booking) {
+        BookingResponse response = new BookingResponse();
+        response.setId(booking.getId());
+        response.setUserId(booking.getUser().getId());
+        response.setUserName(booking.getUser().getName());
+        response.setFacilityId(booking.getFacility().getId());
+        response.setFacilityName(booking.getFacility().getName());
+        response.setDate(booking.getDate());
+        response.setStartTime(booking.getStartTime());
+        response.setEndTime(booking.getEndTime());
+        response.setStatus(booking.getStatus());
+        response.setPurpose(booking.getPurpose());
+        response.setCreatedAt(booking.getCreatedAt());
+        return response;
     }
 }

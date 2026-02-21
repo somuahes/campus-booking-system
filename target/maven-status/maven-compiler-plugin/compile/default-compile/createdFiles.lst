@@ -1,4 +1,4 @@
-com\example\booking\service\DataSeeder.class
+com\example\booking\exception\BookingConflictException.class
 com\example\booking\exception\ApiError.class
 com\example\booking\service\BookingService.class
 com\example\booking\exception\GlobalExceptionHandler.class
@@ -8,6 +8,7 @@ com\example\booking\controller\BookingController.class
 com\example\booking\service\FacilityService.class
 com\example\booking\model\BookingStatus.class
 com\example\booking\model\Facility.class
+com\example\booking\dto\BookingResponse.class
 com\example\booking\controller\FacilityController.class
 com\example\booking\dto\BookingRequest.class
 com\example\booking\BookingApplication.class
