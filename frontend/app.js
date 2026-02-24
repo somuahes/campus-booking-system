@@ -57,9 +57,68 @@ window.updateBooking = async () => {
     await loadBookings();
     await loadAvailability();
   } catch (e) {
-    toast(`Failed to update booking: ${e.message}`, 'danger');
+    showAlert('Update Failed', `<div class="mono">${String(e.message).slice(0,300)}</div>`);
   }
 };
+
+// ---- In-app confirm & alert modals ----
+const confirmModalEl = document.getElementById('confirmModal');
+const alertModalEl = document.getElementById('alertModal');
+let confirmModal = null; let alertModal = null;
+if (window.bootstrap) {
+  if (confirmModalEl) confirmModal = new bootstrap.Modal(confirmModalEl);
+  if (alertModalEl) alertModal = new bootstrap.Modal(alertModalEl);
+}
+
+function showAlert(title, message) {
+  if (!alertModalEl) { toast(message, 'info'); return Promise.resolve(); }
+  const titleEl = document.getElementById('alertModalTitle');
+  const bodyEl = document.getElementById('alertModalBody');
+  titleEl.textContent = title || 'Notice';
+  bodyEl.innerHTML = message;
+  alertModal.show();
+  return Promise.resolve();
+}
+
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    if (!confirmModalEl) {
+      // fallback
+      const ok = window.confirm(message);
+      resolve(ok);
+      return;
+    }
+    const body = document.getElementById('confirmModalBody');
+    const okBtn = document.getElementById('confirmOkBtn');
+    const cancelBtn = document.getElementById('confirmCancelBtn');
+    body.innerHTML = message;
+    const cleanup = () => {
+      okBtn.onclick = null; cancelBtn.onclick = null;
+    };
+    okBtn.onclick = () => { cleanup(); confirmModal.hide(); resolve(true); };
+    cancelBtn.onclick = () => { cleanup(); confirmModal.hide(); resolve(false); };
+    confirmModal.show();
+  });
+}
+
+function showTab(key) {
+  const sections = ['facilities','availability','create','history'];
+  sections.forEach(s => {
+    const elId = document.getElementById('section-' + s);
+    const btn = document.getElementById('tab-' + s + '-btn');
+    if (elId) {
+      if (s === key) {
+        elId.classList.add('active');
+      } else {
+        elId.classList.remove('active');
+      }
+    }
+    if (btn) btn.classList.toggle('active', s === key);
+  });
+}
+
+// ensure default visible tab
+document.addEventListener('DOMContentLoaded', () => showTab('facilities'));
 
 // ---- Helpers ----
 function toast(html, type = "info") {
@@ -325,12 +384,13 @@ async function createBooking() {
     await loadBookings();
     await loadAvailability();
   } catch (e) {
-    toast(`❌ Booking failed: <span class="mono">${String(e.message).slice(0, 300)}</span>`, "danger");
+    showAlert('Booking Failed', `<div class="mono">${String(e.message).slice(0,300)}</div>`);
   }
 }
 
 async function cancelBooking(bookingId) {
-  if (!confirm("Are you sure you want to cancel this booking?")) return;
+  const ok = await showConfirm("Are you sure you want to cancel this booking?");
+  if (!ok) return;
 
   try {
     const res = await fetch(`${API}/bookings/${bookingId}`, {
@@ -341,7 +401,7 @@ async function cancelBooking(bookingId) {
     await loadBookings();
     await loadAvailability();
   } catch (e) {
-    toast(`❌ Cancel failed: <span class="mono">${String(e.message).slice(0, 300)}</span>`, "danger");
+    showAlert('Cancel Failed', `<div class="mono">${String(e.message).slice(0,300)}</div>`);
   }
 }
 
@@ -395,4 +455,6 @@ el("facilitySelect").addEventListener("change", () => {
   await loadFacilities();
   await loadBookings();
   await loadAvailability();
+  // ensure the selected tab is visible when the app starts
+  try { showTab('facilities'); } catch (e) {}
 })();
