@@ -7,6 +7,60 @@ let facilitiesCache = [];
 let bookingsCache = [];
 let selectedSlot = null;
 
+// Current user (in a real app, this would come from authentication)
+const CURRENT_USER_ID = 1;
+let editingBookingId = null;
+const updateModalEl = document.getElementById('updateBookingModal');
+let updateModal = null;
+if (updateModalEl && window.bootstrap) updateModal = new bootstrap.Modal(updateModalEl);
+
+// Open update modal for a booking (exposed globally for inline onclick)
+window.openUpdateModal = (bookingId) => {
+  const b = bookingsCache.map(normalizeBooking).find(x => x.id === bookingId);
+  if (!b) { toast('Booking not found', 'warning'); return; }
+  if (b.userId !== CURRENT_USER_ID) { toast('Cannot edit others\' bookings', 'danger'); return; }
+  // populate fields
+  el('updateFacilityId').value = b.facilityId;
+  el('updateDate').value = b.date;
+  el('updateStartTime').value = b.startTime;
+  el('updateEndTime').value = b.endTime;
+  el('updatePurpose').value = b.purpose || '';
+  editingBookingId = bookingId;
+  if (updateModal) updateModal.show();
+};
+
+window.updateBooking = async () => {
+  if (!editingBookingId) return toast('No booking selected', 'warning');
+  const payload = {
+    userId: CURRENT_USER_ID,
+    facilityId: Number(el('updateFacilityId').value),
+    date: el('updateDate').value,
+    startTime: el('updateStartTime').value,
+    endTime: el('updateEndTime').value,
+    purpose: el('updatePurpose').value || null
+  };
+  if (!payload.facilityId || !payload.date || !payload.startTime || !payload.endTime) {
+    return toast('Please fill all required fields', 'warning');
+  }
+  if (payload.startTime >= payload.endTime) return toast('End time must be after start time', 'warning');
+
+  try {
+    const res = await fetch(`${API}/bookings/${editingBookingId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast('Booking updated successfully', 'success');
+    if (updateModal) updateModal.hide();
+    editingBookingId = null;
+    await loadBookings();
+    await loadAvailability();
+  } catch (e) {
+    toast(`Failed to update booking: ${e.message}`, 'danger');
+  }
+};
+
 // ---- Helpers ----
 function toast(html, type = "info") {
   const cls =
@@ -31,7 +85,8 @@ function normalizeBooking(b) {
     date: b.date,
     startTime,
     endTime,
-    status: b.status
+    status: b.status,
+    purpose: b.purpose ?? b.purpose
   };
 }
 
@@ -138,13 +193,13 @@ function renderBookings() {
 
   const items = bookingsCache
     .map(normalizeBooking)
+    .filter(b => b.userId === CURRENT_USER_ID) // Only show current user's bookings
     .filter(b => !filterStatus || String(b.status).toLowerCase() === filterStatus)
     .filter(b => {
       if (!filterText) return true;
       return (
         String(b.id).includes(filterText) ||
         String(b.facilityId).includes(filterText) ||
-        String(b.userId).includes(filterText) ||
         String(b.status).toLowerCase().includes(filterText) ||
         String(b.date).includes(filterText)
       );
@@ -158,15 +213,24 @@ function renderBookings() {
         status === "cancelled" ? "badge badge-soft-danger" :
           "badge text-bg-warning";
 
+    const canCancel = status === "confirmed" || status === "pending";
+    const cancelButton = canCancel ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelBooking(${b.id})">Cancel</button>` : "";
+    const canEdit = (b.userId === CURRENT_USER_ID) && status !== "cancelled";
+    const editButton = canEdit ? `<button class="btn btn-sm btn-outline-primary ms-2" onclick="openUpdateModal(${b.id})">Edit</button>` : "";
+
     return `
       <div class="p-3 bg-white border rounded-3">
         <div class="d-flex justify-content-between align-items-start">
           <div>
             <div class="fw-semibold">Booking #${b.id}</div>
-            <div class="small-muted">Facility ID: ${b.facilityId} • User ID: ${b.userId}</div>
+            <div class="small-muted">Facility ID: ${b.facilityId}</div>
             <div class="small-muted">Date: ${b.date} • ${b.startTime}–${b.endTime}</div>
           </div>
-          <span class="${badge}">${b.status}</span>
+          <div class="text-end">
+            <span class="${badge}">${b.status}</span>
+            ${editButton}
+            ${cancelButton}
+          </div>
         </div>
       </div>
     `;
@@ -237,16 +301,16 @@ async function loadAvailability() {
 async function createBooking() {
   const payload = {
     facilityId: Number(el("facilityId").value),
-    userId: Number(el("userId").value),
+    userId: CURRENT_USER_ID,
     date: el("date").value,
     startTime: el("startTime").value,
     endTime: el("endTime").value,
-    status: el("status").value
+    purpose: el("purpose").value || null
   };
 
   // basic validation
-  if (!payload.facilityId || !payload.userId || !payload.date || !payload.startTime || !payload.endTime) {
-    toast("Please fill <b>Facility ID</b>, <b>User ID</b>, <b>Date</b>, <b>Start</b>, and <b>End</b>.", "warning");
+  if (!payload.facilityId || !payload.date || !payload.startTime || !payload.endTime) {
+    toast("Please fill <b>Facility ID</b>, <b>Date</b>, <b>Start</b>, and <b>End</b>.", "warning");
     return;
   }
   if (payload.startTime >= payload.endTime) {
@@ -257,6 +321,7 @@ async function createBooking() {
   try {
     await postBooking(payload);
     toast("✅ Booking created successfully.", "success");
+    resetForm();
     await loadBookings();
     await loadAvailability();
   } catch (e) {
@@ -264,12 +329,27 @@ async function createBooking() {
   }
 }
 
+async function cancelBooking(bookingId) {
+  if (!confirm("Are you sure you want to cancel this booking?")) return;
+
+  try {
+    const res = await fetch(`${API}/bookings/${bookingId}`, {
+      method: "DELETE" // Assuming DELETE for cancel, adjust if backend uses different method
+    });
+    if (!res.ok) throw new Error(await res.text());
+    toast("✅ Booking cancelled successfully.", "success");
+    await loadBookings();
+    await loadAvailability();
+  } catch (e) {
+    toast(`❌ Cancel failed: <span class="mono">${String(e.message).slice(0, 300)}</span>`, "danger");
+  }
+}
+
 function resetForm() {
-  el("userId").value = "";
   el("date").value = "";
   el("startTime").value = "";
   el("endTime").value = "";
-  el("status").value = "pending";
+  el("purpose").value = "";
   el("msg").innerHTML = "";
 }
 
@@ -298,6 +378,7 @@ el("btnCheckAvailability").addEventListener("click", loadAvailability);
 el("btnCreateBooking").addEventListener("click", createBooking);
 el("btnResetForm").addEventListener("click", resetForm);
 el("btnAutoFillBooking").addEventListener("click", autoFillBookingFromSlot);
+el("btnUpdateBooking").addEventListener("click", window.updateBooking);
 el("filterText").addEventListener("input", renderBookings);
 el("filterStatus").addEventListener("change", renderBookings);
 el("facilitySelect").addEventListener("change", () => {

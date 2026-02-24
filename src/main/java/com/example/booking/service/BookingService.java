@@ -98,21 +98,35 @@ public class BookingService {
             throw new IllegalStateException("Cannot update a cancelled booking");
         }
         
-        // Check for conflicts (excluding this booking)
-        boolean hasConflict = bookingRepository.existsConflictingBooking(
-                request.getFacilityId(),
-                request.getDate(),
-                request.getStartTime(),
-                request.getEndTime()
-            );
+        // Validate user exists
+        User user = userRepository.findById(request.getUserId())
+                .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + request.getUserId()));
         
-        if (hasConflict) {
+        // Validate facility exists and is available
+        Facility facility = facilityRepository.findById(request.getFacilityId())
+                .orElseThrow(() -> new EntityNotFoundException("Facility not found with id: " + request.getFacilityId()));
+        
+        if (!facility.getIsAvailable()) {
+            throw new IllegalStateException("Facility is not available for booking");
+        }
+        
+        // Check for conflicts (excluding this booking)
+        List<Booking> conflictingBookings = bookingRepository.findActiveBookingsByFacilityAndDate(
+                request.getFacilityId(), request.getDate())
+                .stream()
+                .filter(b -> !b.getId().equals(id)) // Exclude current booking
+                .filter(b -> timeOverlap(b.getStartTime(), b.getEndTime(), request.getStartTime(), request.getEndTime()))
+                .toList();
+        
+        if (!conflictingBookings.isEmpty()) {
             throw new BookingConflictException(
                 "Facility is already booked during the requested time slot"
             );
         }
         
         // Update fields
+        booking.setUser(user);
+        booking.setFacility(facility);
         booking.setDate(request.getDate());
         booking.setStartTime(request.getStartTime());
         booking.setEndTime(request.getEndTime());
@@ -160,6 +174,10 @@ public class BookingService {
         return bookingRepository.findByFacilityId(facilityId).stream()
                 .map(this::convertToResponse)
                 .collect(Collectors.toList());
+    }
+    
+    private boolean timeOverlap(LocalTime aStart, LocalTime aEnd, LocalTime bStart, LocalTime bEnd) {
+        return aStart.isBefore(bEnd) && aEnd.isAfter(bStart);
     }
     
     private BookingResponse convertToResponse(Booking booking) {

@@ -45,7 +45,8 @@ CREATE TABLE bookings (
   end_time    TIME NOT NULL,
   status      VARCHAR(30) NOT NULL CHECK (status IN ('CONFIRMED', 'CANCELLED', 'COMPLETED', 'PENDING')),
   purpose     VARCHAR(500),
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CHECK (start_time < end_time)
   -- NO updated_at, NO slot in entity
 );
 

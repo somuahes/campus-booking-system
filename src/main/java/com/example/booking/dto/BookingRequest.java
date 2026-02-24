@@ -16,11 +16,34 @@ public class BookingRequest {
     @FutureOrPresent(message = "Date must be present or future")
     private LocalDate date;
     
+    @AssertTrue(message = "Cannot book in the past")
+    private boolean isNotInPast() {
+        if (date == null || startTime == null) return true;
+        LocalDate today = LocalDate.now();
+        if (date.isAfter(today)) return true;
+        if (date.isBefore(today)) return false;
+        // Today: check if startTime is after now
+        return startTime.isAfter(LocalTime.now());
+    }
+    
     @NotNull(message = "Start time is required")
     private LocalTime startTime;
     
     @NotNull(message = "End time is required")
     private LocalTime endTime;
+    
+    @AssertTrue(message = "End time must be after start time")
+    private boolean isEndTimeAfterStartTime() {
+        return startTime != null && endTime != null && endTime.isAfter(startTime);
+    }
+    
+    @AssertTrue(message = "Booking times must be within operating hours (08:00 - 20:00)")
+    private boolean isWithinOperatingHours() {
+        if (startTime == null || endTime == null) return true; // Let @NotNull handle nulls
+        LocalTime open = LocalTime.of(8, 0);
+        LocalTime close = LocalTime.of(20, 0);
+        return !startTime.isBefore(open) && !endTime.isAfter(close);
+    }
     
     @Size(max = 500, message = "Purpose cannot exceed 500 characters")
     private String purpose;
