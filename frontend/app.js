@@ -1,5 +1,6 @@
-const API = "https://campus-booking-system-ve16.onrender.com";
+const API = "https://campus-booking-system-ve16.onrender.com/api";
 document.getElementById("apiUrl").textContent = API;
+
 
 const el = (id) => document.getElementById(id);
 
@@ -396,8 +397,8 @@ function renderBookings() {
   const upcomingToday = allMine.filter(b => {
     const bookingDate = String(b.date).split('T')[0];
     return bookingDate === today &&
-    String(b.status).toLowerCase() !== 'cancelled' &&
-    toMinutes(b.startTime) >= nowMins;
+      String(b.status).toLowerCase() !== 'cancelled' &&
+      toMinutes(b.startTime) >= nowMins;
   });
   const upcomingEl = el('upcomingToday');
   if (upcomingEl) {
@@ -441,7 +442,7 @@ function renderBookings() {
     // Extract just the date part (handle ISO dates like "2026-02-25" or "2026-02-25T00:00:00")
     const bookingDate = String(b.date).split('T')[0];
     const isToday = bookingDate === today;
-    
+
     // Time-until for today's confirmed bookings
     let timeUntil = '';
     const isOngoing = isToday && toMinutes(b.startTime) <= nowMins && toMinutes(b.endTime) > nowMins;
@@ -627,18 +628,18 @@ async function loadAvailability() {
   const active = bookingsCache.map(normalizeBooking).filter(b => {
     const bookingDate = String(b.date).split('T')[0];
     return b.facilityId === facilityId &&
-    bookingDate === date &&
-    String(b.status).toLowerCase() !== 'cancelled';
+      bookingDate === date &&
+      String(b.status).toLowerCase() !== 'cancelled';
   });
 
   const slots = generateSlots();
-  
+
   // Use GMT/UTC time to determine if slots are in the past
   const nowUTC = new Date();
   const selectedDate = date; // date format: "YYYY-MM-DD"
   const todayUTC = nowUTC.toISOString().slice(0, 10);
   const nowMinsUTC = nowUTC.getUTCHours() * 60 + nowUTC.getUTCMinutes();
-  
+
   const availability = slots.map(s => {
     const isBooked = active.some(b => timeOverlap(s.start, s.end, b.startTime, b.endTime));
     const isPast = selectedDate === todayUTC && toMinutes(s.end) <= nowMinsUTC;
