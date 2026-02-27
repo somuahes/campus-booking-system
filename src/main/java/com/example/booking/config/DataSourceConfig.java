@@ -32,8 +32,12 @@ public class DataSourceConfig {
     @Primary
     public DataSource dataSource() {
         try {
-            // Normalise scheme so java.net.URI can parse it
-            String normalized = databaseUrl
+            // Strip "jdbc:" prefix if present (some env vars are set with it already)
+            String rawUrl = databaseUrl.replaceFirst("^jdbc:", "");
+
+            // Normalise scheme so java.net.URI can parse it (URI doesn't understand
+            // postgresql://)
+            String normalized = rawUrl
                     .replace("postgresql://", "http://")
                     .replace("postgres://", "http://");
 
