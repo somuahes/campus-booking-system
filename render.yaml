@@ -2,7 +2,6 @@ services:
   - type: web
     name: campus-booking-system
     runtime: docker
-    dockerfilePath: ./Dockerfile
     envVars:
       - key: PORT
         value: "8081"
