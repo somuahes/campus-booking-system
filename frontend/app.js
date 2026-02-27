@@ -1,4 +1,4 @@
-const API = "https://campus-booking-system-ve16.onrender.com/api";
+const API = "https://campus-booking-system-ve16.onrender.com";
 document.getElementById("apiUrl").textContent = API;
 
 
