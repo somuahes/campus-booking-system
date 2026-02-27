@@ -1,4 +1,4 @@
-const API = "http://localhost:8081/api";
+const API = "https://campus-booking-system-ve16.onrender.com/";
 document.getElementById("apiUrl").textContent = API;
 
 const el = (id) => document.getElementById(id);
